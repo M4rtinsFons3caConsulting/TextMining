@@ -18,52 +18,106 @@ from tensorflow.keras.utils import to_categorical
 from keras.models import Model
 from keras.layers import Input, LSTM, Dense, Bidirectional, Masking
 
+
+def remove_emojis(text):
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # Emoticons
+        "\U0001F300-\U0001F5FF"  # Symbols & Pictographs
+        "\U0001F680-\U0001F6FF"  # Transport & Map symbols
+        "\U0001F1E0-\U0001F1FF"  # Flags (iOS)
+        "\U00002700-\U000027BF"  # Dingbats
+        "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+        "\U00002600-\U000026FF"  # Misc symbols
+        "\U00002B50"             # ⭐
+        "\U00002B06"             # ⬆️
+        "\U000024C2-\U0001F251"  # Enclosed characters
+        "]+", flags=re.UNICODE
+    )
+    return emoji_pattern.sub(r'', text)
+
+
 def preprocess(
-    dataframe: pd.DataFrame
-    ,col_name: str
+    text: str
+    ,keep_ticker: bool
     ,keep_url: bool
-    ,lemmatize: bool
-    ,stemmize: bool
-):
-    updates = []
-    stop = set(stopwords.words('english'))
-    lemma = WordNetLemmatizer()
-    stemmer = SnowballStemmer('english')
+    ,stopwords: set
+    ,lemmatizer = None
+    ,stemmizer = None
+) -> str:
+    if not isinstance(text, str):
+        return ""
+    
+    black_list = ['eu', 'us', 'uk']
 
-    for j in tqdm(dataframe[col_name]):
+    # LOWERCASE TEXT
+    text = text.lower()
 
-        text = j
-
-        # LOWERCASE TEXT
-        text = text.lower()
-
+    if keep_ticker:
         # REPLACE TICKERS WITH SPECIAL TOKEN
-        text = re.sub(r"\$[A-Z]{1,5}", "[TICKER]", text)
-        if keep_url:
-            # REPLACE URL WITH SPECIAL TOKEN
-            text = re.sub(r"http\S+", "[URL]", text)
-        else:
-            # REMOVE URLS
-            text = re.sub(r"http\S+", "", text)
-        # REMOVE PUNCTUATION
-        text = re.sub(f"[{re.escape(string.punctuation)}]", "", text)
+        text = re.sub(r"\$[a-zA-Z]+", "[TICKER]", text)
+    else:
+        # REMOVE TICKER
+        text = re.sub(r"\$[a-zA-Z]+", "", text)
 
-        # REMOVE STOPWORDS
-        text = " ".join([word for word in text.split() if word not in stop])
+    if keep_url:
+        # REPLACE URL WITH SPECIAL TOKEN
+        text = re.sub(r"http\S+", "[URL]", text)
+    else:
+        # REMOVE URLS
+        text = re.sub(r"http\S+", "", text)
 
-        # LEMMATIZE
-        if lemmatize:
-            text = " ".join(lemma.lemmatize(word) for word in text.split())
+    # REMOVE PRICES
+    text = re.sub(r"[€$£¥]\d+(\.\d+)?", "", text)
 
-        #Stemming
-        if stemmize:
-            text = " ".join(stemmer.stem(word) for word in text.split())
+    # REMOVE PUNCTUATION
+    text = re.sub(f"[{re.escape(string.punctuation)}]", "", text)
+    text = text.replace("…", "")
 
-        updates.append(text)
+    # REMOVE EMOJIS
+    text = remove_emojis(text)
 
-    dataframe[col_name] = updates
+    # REMOVE OTHER SPECIAL CHARACTERS
+    for char in ["’", "‘", '”', '“', "®", "™", "\x80", "→", "–", "•"]:
+        text = text.replace(char, "")
+    for char in ["\x8f", "\x9d", "—"]:
+        text = text.replace(char, " ")
 
-    return dataframe
+    # REMOVE STOPWORDS
+    text = " ".join([word for word in text.split() if word not in stopwords])
+
+    # LEMMATIZE
+    if lemmatizer:
+        text = " ".join(
+            word if word in black_list
+            else lemmatizer.lemmatize(word) 
+            for word in text.split()
+        )
+
+    # STEMMIZE
+    if stemmizer:
+        text = " ".join(
+            word if word in black_list
+            else stemmizer.stem(word)
+            for word in text.split()
+        )
+
+    return text
+
+
+def find_punctuated_tokens(texts):
+    punctuated = set()
+    for text in texts:
+        tokens = text.split()
+
+        for token in tokens:
+            if re.search(r'[^\w\s]', token):
+                if '‑' in token:
+                    pass
+                else:
+                    punctuated.add(token)
+                    
+    return punctuated
 
 
 def eval_sklearn_model(vectorizer, classifier, skf, X_train, y_train):
