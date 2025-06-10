@@ -1,20 +1,17 @@
 import re
 from tqdm import tqdm
 
-import pandas as pd
 import numpy as np
 
-import nltk
 import string
-from nltk.corpus import stopwords
-from nltk.stem import SnowballStemmer
-from nltk.stem.wordnet import WordNetLemmatizer
 
 from sklearn.pipeline import Pipeline
 
+from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+import torch
+
 import tensorflow as tf
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.utils import to_categorical
 from keras.models import Model
 from keras.layers import Input, LSTM, Dense, Bidirectional, Masking
 
@@ -22,16 +19,16 @@ from keras.layers import Input, LSTM, Dense, Bidirectional, Masking
 def remove_emojis(text):
     emoji_pattern = re.compile(
         "["
-        "\U0001F600-\U0001F64F"  # Emoticons
-        "\U0001F300-\U0001F5FF"  # Symbols & Pictographs
-        "\U0001F680-\U0001F6FF"  # Transport & Map symbols
-        "\U0001F1E0-\U0001F1FF"  # Flags (iOS)
-        "\U00002700-\U000027BF"  # Dingbats
-        "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
-        "\U00002600-\U000026FF"  # Misc symbols
-        "\U00002B50"             # ⭐
-        "\U00002B06"             # ⬆️
-        "\U000024C2-\U0001F251"  # Enclosed characters
+        "\U0001F600-\U0001F64F"
+        "\U0001F300-\U0001F5FF"
+        "\U0001F680-\U0001F6FF"
+        "\U0001F1E0-\U0001F1FF"
+        "\U00002700-\U000027BF"
+        "\U0001F900-\U0001F9FF"
+        "\U00002600-\U000026FF"
+        "\U00002B50"
+        "\U00002B06"
+        "\U000024C2-\U0001F251"
         "]+", flags=re.UNICODE
     )
     return emoji_pattern.sub(r'', text)
@@ -120,7 +117,13 @@ def find_punctuated_tokens(texts):
     return punctuated
 
 
-def eval_sklearn_model(vectorizer, classifier, skf, X_train, y_train):
+def eval_sklearn_model(
+    vectorizer
+    ,classifier
+    ,skf
+    ,X_train
+    ,y_train
+):
     pipeline = Pipeline([
         ('vectorizer', vectorizer)
         ,('classifier', classifier)
@@ -215,3 +218,140 @@ def eval_lstm_model(vectorizer, emb_size, skf, X_train, y_train):
         history_all.append(history)
 
     return y_true_all, y_pred_all, history_all
+
+
+def generate_cls_embeddings(
+    texts
+    ,embeddings_model
+    ,desc="Generating CLS Embeddings"
+):
+    """
+    Generates CLS token embeddings for a list of input texts.
+
+    Args:
+        texts (list of str): List of text inputs.
+        embeddings_model (callable): A Hugging Face embedding pipeline or model that returns hidden states.
+        desc (str): Description for the tqdm progress bar.
+
+    Returns:
+        List of torch.Tensor: CLS embeddings for each input text.
+    """
+    cls_embeddings = []
+    for text in tqdm(texts, desc=desc):
+        embeddings = embeddings_model(text)
+        # Assuming output format is [ [ [CLS], token1, token2, ... ] ]
+        cls_embedding = torch.tensor(embeddings[0][0])
+        cls_embeddings.append(cls_embedding)
+    return cls_embeddings
+
+
+def eval_transformer(
+    transformer: str
+    ,objective: str
+    ,skf
+    ,X_train
+    ,y_train
+    ,classifier=None
+):
+    transf_pipeline = pipeline(
+        objective
+        ,model=transformer
+        ,tokenizer=transformer
+        ,batch_size=32
+        ,framework="pt"
+        ,device_map="cuda"
+        ,truncation=True
+    )
+
+    y_true_all = []
+    y_pred_all = []
+
+    for train_idx, val_idx in skf.split(X_train, y_train):
+        X_tr, X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
+        y_tr, y_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
+
+        if classifier:
+            X_tr = np.array(
+                generate_cls_embeddings(
+                    X_tr
+                    ,embeddings_model=transf_pipeline
+                )
+            )
+            y_tr = np.array(y_tr)
+
+            X_val = np.array(
+                generate_cls_embeddings(
+                    X_val
+                    ,embeddings_model=transf_pipeline
+                )
+            )
+            y_val = np.array(y_val)
+
+            classifier.fit(X_tr, y_tr)
+            y_pred = classifier.predict(X_val)
+
+        else:
+            preds = transf_pipeline(X_val.tolist())
+            y_pred = [
+                2 if pred['label'] == 'LABEL_2'
+                else 1 if pred['label'] == 'LABEL_1'
+                else 0 for pred in preds
+            ]
+
+        y_true_all.extend(y_val)
+        y_pred_all.extend(y_pred)
+
+    return y_true_all, y_pred_all
+
+
+def eval_llm_model(
+    model: str
+    ,skf
+    ,X_train
+    ,y_train
+    ,system_message: str
+    ,device_map: str = "cuda"
+    ,max_new_tokens: int = 3
+):
+    tokenizer = AutoTokenizer.from_pretrained(model)
+    lm = AutoModelForCausalLM.from_pretrained(
+        model
+        ,device_map=device_map
+        ,torch_dtype="auto"
+        ,trust_remote_code=False
+    )
+    pipe = pipeline(
+        "text-generation"
+        ,model=lm
+        ,tokenizer=tokenizer
+        ,return_full_text=False
+        ,max_new_tokens=max_new_tokens
+        ,use_cache=True
+    )
+
+    def analyze_sentiment(query):
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": query}
+        ]
+
+        outputs = pipe(messages)
+        answer = outputs[0]["generated_text"].strip()
+
+        first_token = answer.split()[0] if len(answer.split()) > 0 else None
+        
+        return first_token if first_token in {'0', '1', '2'} else '2'  # Return 'Neutral' as default
+
+    y_true_all = []
+    y_pred_all = []
+
+    for train_idx, val_idx in skf.split(X_train, y_train):
+        X_val = X_train.iloc[val_idx]
+        y_val = y_train.iloc[val_idx]
+
+        y_pred = [analyze_sentiment(text) for text in X_val]
+
+        y_true_all.extend(y_val)
+        y_pred_all.extend(y_pred)
+
+    return y_true_all, y_pred_all
