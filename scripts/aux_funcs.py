@@ -7,7 +7,7 @@ import string
 
 from sklearn.pipeline import Pipeline
 
-from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 import torch
 
 import tensorflow as tf
@@ -340,7 +340,7 @@ def eval_llm_model(
 
         first_token = answer.split()[0] if len(answer.split()) > 0 else None
         
-        return first_token if first_token in {'0', '1', '2'} else '2'  # Return 'Neutral' as default
+        return int(first_token) if first_token in {'0', '1', '2'} else 2  # Return 'Neutral' as default
 
     y_true_all = []
     y_pred_all = []
@@ -350,6 +350,51 @@ def eval_llm_model(
         y_val = y_train.iloc[val_idx]
 
         y_pred = [analyze_sentiment(text) for text in X_val]
+
+        y_true_all.extend(y_val)
+        y_pred_all.extend(y_pred)
+
+    return y_true_all, y_pred_all
+
+
+def eval_t5_model(
+    model: str,
+    skf,
+    X_train,
+    y_train,
+    system_message: str = "",
+    device_map: str = "cuda",
+    max_new_tokens: int = 5
+):
+    tokenizer = AutoTokenizer.from_pretrained(model)
+    lm = AutoModelForSeq2SeqLM.from_pretrained(
+        model,
+        device_map=device_map,
+        torch_dtype="auto"
+    )
+
+    pipe = pipeline(
+        "text2text-generation",
+        model=lm,
+        tokenizer=tokenizer,
+        max_new_tokens=max_new_tokens
+    )
+
+    def classify_tweet_t5(tweet):
+        prompt = f"{system_message} Tweet: {tweet}"
+        output = pipe(prompt)[0]['generated_text'].strip().lower()
+
+        output = pipe(prompt)[0]['generated_text'].strip()
+        return int(output) if output in {'0', '1', '2'} else 2  # Return 'Neutral' as default
+
+    y_true_all = []
+    y_pred_all = []
+
+    for train_idx, val_idx in skf.split(X_train, y_train):
+        X_val = X_train.iloc[val_idx]
+        y_val = y_train.iloc[val_idx]
+
+        y_pred = [classify_tweet_t5(text) for text in X_val]
 
         y_true_all.extend(y_val)
         y_pred_all.extend(y_pred)
