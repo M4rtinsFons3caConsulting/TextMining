@@ -19,7 +19,7 @@ class Word2Vec(BaseEstimator, TransformerMixin):
 
     def _vectorize(self, doc):
         tokens = self.tokenizer(doc)
-        valid_tokens = [token for token in tokens if token in self.model]
+        valid_tokens = [token for token in tokens if token in self.model.key_to_index]
         if not valid_tokens:
             return np.zeros(self.vector_size)
         
