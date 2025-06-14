@@ -499,88 +499,37 @@ def eval_llm_model(
         ,use_cache=True
     )
 
-    def analyze_sentiment(query):
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": query}
+    def build_prompts(texts, system_message):
+        return [
+            [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": text}
+            ]
+            for text in texts
         ]
 
-        outputs = pipe(messages)
+    def analyze_sentiment(prompt):
+        outputs = pipe(prompt)
         answer = outputs[0]["generated_text"].strip()
 
-        first_token = answer.split()[0] if len(answer.split()) > 0 else None
+        try:
+            first_token = answer.split()[0]
+            return first_token if first_token in {'0', '1', '2'} else 2 # Return 'Neutral' as default
         
-        return int(first_token) if first_token in {'0', '1', '2'} else 2  # Return 'Neutral' as default
+        except ValueError:
+            return 2 # Return 'Neutral' as default
 
     y_true_all = []
     y_pred_all = []
 
-    for train_idx, val_idx in skf.split(X_train, y_train):
-        X_val = X_train.iloc[val_idx]
+    for _, val_idx in skf.split(X_train, y_train):
+
+        X_val = build_prompts(X_train.iloc[val_idx])
         y_val = y_train.iloc[val_idx]
 
-        y_pred = [analyze_sentiment(text) for text in X_val]
+        y_pred = X_val.apply(analyze_sentiment)
 
         y_true_all.extend(y_val)
         y_pred_all.extend(y_pred)
 
     return y_true_all, y_pred_all
-
-
-# def eval_transformer(
-#     transformer: str
-#     ,objective: str
-#     ,skf
-#     ,X_train
-#     ,y_train
-#     ,classifier=None
-# ):
-#     transf_pipeline = pipeline(
-#         objective
-#         ,model=transformer
-#         ,tokenizer=transformer
-#         ,batch_size=32
-#         ,framework="pt"
-#         ,device_map="cuda"
-#         ,truncation=True
-#     )
-
-#     y_true_all = []
-#     y_pred_all = []
-
-#     for train_idx, val_idx in skf.split(X_train, y_train):
-#         X_tr, X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
-#         y_tr, y_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
-
-#         if classifier:
-#             X_tr = np.array(
-#                 generate_cls_embeddings(
-#                     X_tr
-#                     ,embeddings_model=transf_pipeline
-#                 )
-#             )
-#             y_tr = np.array(y_tr)
-
-#             X_val = np.array(
-#                 generate_cls_embeddings(
-#                     X_val
-#                     ,embeddings_model=transf_pipeline
-#                 )
-#             )
-#             y_val = np.array(y_val)
-
-#             classifier.fit(X_tr, y_tr)
-#             y_pred = classifier.predict(X_val)
-
-#         else:
-#             preds = transf_pipeline(X_val.tolist())
-#             y_pred = [
-#                 2 if pred['label'] == 'LABEL_2'
-#                 else 1 if pred['label'] == 'LABEL_1'
-#                 else 0 for pred in preds
-#             ]
-
-#         y_true_all.extend(y_val)
-#         y_pred_all.extend(y_pred)
-
-#     return y_true_all, y_pred_all
