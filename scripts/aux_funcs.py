@@ -540,8 +540,7 @@ def eval_llm_model(
         X_val = build_prompts(X_train.iloc[val_idx], system_message)
         y_val = y_train.iloc[val_idx]
 
-        y_pred = X_val.apply(analyze_sentiment)
-
+        y_pred = [analyze_sentiment(p) for p in X_val]
         y_true_all.extend(y_val)
         y_pred_all.extend(y_pred)
 
