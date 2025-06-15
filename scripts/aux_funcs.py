@@ -524,7 +524,7 @@ def eval_llm_model(
             try:
                 first_token = answer.split()[0]
                 if first_token in {'0', '1', '2'}:
-                    return first_token
+                    return int(first_token)
                 # If not a valid token, loop again
             except (ValueError, IndexError):
                 pass
@@ -532,15 +532,33 @@ def eval_llm_model(
 
     y_true_all = []
     y_pred_all = []
+    indices_all = [] # To store the indices of the validation set
 
     for _, val_idx in skf.split(X_train, y_train):
 
-        X_val = build_prompts(X_train.iloc[val_idx], system_message)
+        X_val_prompts = build_prompts(X_train.iloc[val_idx], system_message)
         y_val = y_train.iloc[val_idx]
+        val_indices = X_train.iloc[val_idx].index # Get the original indices of the validation set
 
-        y_pred = [analyze_sentiment(p) for p in X_val]
+        y_pred = [analyze_sentiment(p) for p in X_val_prompts]
+
         y_true_all.extend(y_val)
         y_pred_all.extend(y_pred)
+        indices_all.extend(val_indices) # Store the validation indices
+
+    # Create a pandas DataFrame with the validation indices
+    results_df = pd.DataFrame({
+        'Index': indices_all,
+        'y_true': y_true_all,
+        'y_pred': y_pred_all
+    })
+
+    # Define the file path for the CSV
+    csv_file_path = "llm_evaluation_results.csv" # Choose a suitable file name
+
+    # Write to CSV
+    results_df.to_csv(csv_file_path, index=False) # index=False prevents writing the DataFrame index as a column
+
+    print(f"LLM evaluation results exported to {csv_file_path}")
 
     return y_true_all, y_pred_all
-
