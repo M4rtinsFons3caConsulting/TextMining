@@ -17,7 +17,7 @@ BLACK_LIST = list({
 
 # Default preprocessing configuration
 DEFAULT_CFG = {
-    "fix_acronyms": False,
+    "fix_acronyms": True,
     "delete_spaces": True,
     "demojify": True,
     "clean_ticker": True,
@@ -25,15 +25,15 @@ DEFAULT_CFG = {
     "anonymize_ticker": False,
     "clean_url": True,
     "keep_url": False,
-    "clean_handles": True,
+    "clean_handles": False,
     "keep_handle": False,
     "clean_hashtags": True,
     "keep_hashtag": False,
     "clean_prices": True,
     "remove_punctuation": True,
     "remove_special_chars": True,
-    "remove_stopwords": False,
-    "lemmatize_text": False,
+    "remove_stopwords": True,
+    "lemmatize_text": True,
     "stem_text": False,
     "remove_dates_with_search": True,
     "clean_remaining_date_time": True,
@@ -42,12 +42,12 @@ DEFAULT_CFG = {
     "remove_possessives": True,
     "remove_locations": True,
     "remove_all_integers": True,
-    "to_lower": False
+    "to_lower": True
 }
 
 def preprocess(
     corpus: pd.Series,
-    cfg: Dict[str, Any],
+    cfg: Optional[Dict[str, bool]] = {},
     stopwords: Optional[Set[str]] = None,
     lemmatizer: Optional[Any] = None,
     stemmizer: Optional[Any] = None,
@@ -236,7 +236,7 @@ def preprocess(
         "fix_acronyms": _fix_acronyms,
         "delete_spaces": _delete_spaces,
         "demojify": _demojify,
-        "clean_ticker": lambda text: _clean_ticker(text, cfg.get("keep_ticker", False) or cfg.get("anonymize_ticker", False)),
+        "clean_ticker": lambda text: _clean_ticker(text, cfg.get("keep_ticker", False), cfg.get("anonymize_ticker", False)),
         "clean_url": lambda text: _clean_url(text, cfg.get("keep_url", False)),
         "clean_handles": lambda text: _clean_handles(text, cfg.get("keep_handle", False)),
         "clean_hashtags": lambda text: _clean_hashtags(text, cfg.get("keep_hashtag", False)),
@@ -259,7 +259,7 @@ def preprocess(
     # Execute steps according to cfg and update corpus sequentially:
     for key, func in mapping.items():
         if cfg.get(key, False):
-            corpus = corpus.apply(func)
+            corpus = corpus.apply(func).apply(_delete_spaces)
 
     return corpus
    

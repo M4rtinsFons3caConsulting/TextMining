@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from sklearn.pipeline import Pipeline
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.utils.class_weight import compute_class_weight
 
 from transformers import (
     pipeline, 
@@ -148,8 +149,8 @@ def create_lstm_model(input_length: int, emb_size: int) -> Any:
     # Masking layer to ignore zero-padded embeddings
     mask = Masking(mask_value=0)(input_)
 
-    # Bidirectional LSTM layer with 32 units
-    lstm = Bidirectional(LSTM(units=32))(mask)
+    # Bidirectional LSTM layer with 256 units
+    lstm = Bidirectional(LSTM(units=256))(mask)
 
     # Output layer with 3 units and softmax activation for multi-class prediction
     output = Dense(3, activation='softmax')(lstm)
@@ -348,6 +349,15 @@ def eval_lstm_model(
         history = model.fit(
             X_tr_pad,
             y_tr_cat,
+            class_weight=dict(
+                enumerate(
+                    compute_class_weight(
+                        class_weight='balanced'
+                        ,classes=np.unique(y_tr)
+                        ,y=y_tr
+                    )
+                )
+            ),
             epochs=5,
             batch_size=32,
             verbose=1,
@@ -523,7 +533,7 @@ def eval_llm_model(
 
     for _, val_idx in skf.split(X_train, y_train):
 
-        X_val = build_prompts(X_train.iloc[val_idx])
+        X_val = build_prompts(X_train.iloc[val_idx], system_message)
         y_val = y_train.iloc[val_idx]
 
         y_pred = X_val.apply(analyze_sentiment)
