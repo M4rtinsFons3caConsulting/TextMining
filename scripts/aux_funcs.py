@@ -519,10 +519,8 @@ def eval_llm_model(
 
     def analyze_sentiment(prompt):
         while True:
-            print(prompt)
             outputs = pipe(prompt)
             answer = outputs[0]["generated_text"].strip()
-            print(answer)
             try:
                 first_token = answer.split()[0]
                 if first_token in {'0', '1', '2'}:
