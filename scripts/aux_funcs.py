@@ -518,15 +518,17 @@ def eval_llm_model(
         ]
 
     def analyze_sentiment(prompt):
-        outputs = pipe(prompt)
-        answer = outputs[0]["generated_text"].strip()
-
-        try:
-            first_token = answer.split()[0]
-            return first_token if first_token in {'0', '1', '2'} else 2 # Return 'Neutral' as default
-        
-        except ValueError:
-            return 2 # Return 'Neutral' as default
+        while True:
+            outputs = pipe(prompt)
+            answer = outputs[0]["generated_text"].strip()
+            try:
+                first_token = answer.split()[0]
+                if first_token in {'0', '1', '2'}:
+                    return first_token
+                # If not a valid token, loop again
+            except ValueError:
+                pass
+            # Loop repeats indefinitely until a valid token is returned
 
     y_true_all = []
     y_pred_all = []
