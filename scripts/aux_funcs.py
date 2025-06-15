@@ -22,7 +22,6 @@ from keras.models import Model
 from keras.layers import Input, LSTM, Dense, Bidirectional, Masking
 
 
-
 def find_punctuated_tokens(texts: List[str]) -> Set[str]:
     """
     Identify and collect unique tokens containing punctuation from a list of texts.
@@ -349,7 +348,7 @@ def eval_lstm_model(
         history = model.fit(
             X_tr_pad,
             y_tr_cat,
-            epochs=2,
+            epochs=5,
             batch_size=32,
             verbose=1,
             validation_data=(X_val_pad, y_val_cat)
@@ -533,3 +532,4 @@ def eval_llm_model(
         y_pred_all.extend(y_pred)
 
     return y_true_all, y_pred_all
+
