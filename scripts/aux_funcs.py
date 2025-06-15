@@ -528,7 +528,7 @@ def eval_llm_model(
                 if first_token in {'0', '1', '2'}:
                     return first_token
                 # If not a valid token, loop again
-            except ValueError:
+            except (ValueError, IndexError):
                 pass
             # Loop repeats indefinitely until a valid token is returned
 
