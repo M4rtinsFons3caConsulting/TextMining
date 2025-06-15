@@ -490,7 +490,8 @@ def eval_llm_model(
     ,y_train
     ,system_message: str
     ,device_map: str = "cuda"
-    ,max_new_tokens: int = 3
+    ,max_new_tokens: int = 1
+    ,batch_size: int = 16
 ):
     tokenizer = AutoTokenizer.from_pretrained(model)
     lm = AutoModelForCausalLM.from_pretrained(
@@ -517,48 +518,68 @@ def eval_llm_model(
             for text in texts
         ]
 
-    def analyze_sentiment(prompt):
+    def analyze_sentiment_batch(prompts):
         while True:
-            outputs = pipe(prompt)
-            answer = outputs[0]["generated_text"].strip()
-            try:
-                first_token = answer.split()[0]
-                if first_token in {'0', '1', '2'}:
-                    return int(first_token)
-                # If not a valid token, loop again
-            except (ValueError, IndexError):
-                pass
-            # Loop repeats indefinitely until a valid token is returned
+            outputs = pipe(
+                prompts, 
+                batch_size=batch_size,
+                temperature=0
+            )
+            answers = [output[0]["generated_text"].strip() for output in outputs]
+            predictions = []
+            all_valid = True
+            for answer in answers:
+                try:
+                    first_token = answer.split()[0]
+                    if first_token in {'0', '1', '2'}:
+                        predictions.append(int(first_token))
+                    else:
+                        all_valid = False
+                        break
+                except (ValueError, IndexError):
+                    all_valid = False
+                    break
+
+            if all_valid:
+                return predictions
+            else:
+                 pass
 
     y_true_all = []
     y_pred_all = []
-    indices_all = [] # To store the indices of the validation set
+    indices_all = []
 
     for _, val_idx in skf.split(X_train, y_train):
 
-        X_val_prompts = build_prompts(X_train.iloc[val_idx], system_message)
-        y_val = y_train.iloc[val_idx]
-        val_indices = X_train.iloc[val_idx].index # Get the original indices of the validation set
+        X_val_subset = X_train.iloc[val_idx]
+        y_val_subset = y_train.iloc[val_idx]
+        val_indices = X_val_subset.index
 
-        y_pred = [analyze_sentiment(p) for p in X_val_prompts]
+        temp_df = pd.DataFrame({
+            'text': X_val_subset,
+            'true_sentiment': y_val_subset,
+            'original_index': val_indices
+        })
 
-        y_true_all.extend(y_val)
-        y_pred_all.extend(y_pred)
-        indices_all.extend(val_indices) # Store the validation indices
+        val_prompts = build_prompts(temp_df['text'].tolist(), system_message)
+        temp_df['prompt'] = val_prompts
 
-    # Create a pandas DataFrame with the validation indices
+        predicted_sentiments = []
+        for i in range(0, len(temp_df), batch_size):
+            batch_prompts = temp_df['prompt'][i:i+batch_size].tolist()
+            batch_predictions = analyze_sentiment_batch(batch_prompts)
+            predicted_sentiments.extend(batch_predictions)
+
+        temp_df['predicted_sentiment'] = predicted_sentiments
+
+        y_true_all.extend(temp_df['true_sentiment'].tolist())
+        y_pred_all.extend(temp_df['predicted_sentiment'].tolist())
+        indices_all.extend(temp_df['original_index'].tolist())
+
     results_df = pd.DataFrame({
         'Index': indices_all,
-        'y_true': y_true_all,
-        'y_pred': y_pred_all
+        'True_Sentiment': y_true_all,
+        'Predicted_Sentiment': y_pred_all
     })
 
-    # Define the file path for the CSV
-    csv_file_path = "llm_evaluation_results.csv" # Choose a suitable file name
-
-    # Write to CSV
-    results_df.to_csv(csv_file_path, index=False) # index=False prevents writing the DataFrame index as a column
-
-    print(f"LLM evaluation results exported to {csv_file_path}")
-
-    return y_true_all, y_pred_all
+    return results_df
