@@ -220,7 +220,7 @@ def preprocess(
         for country in places.countries:
             text = re.sub(rf"\b{re.escape(country)}\b", "", text, flags=re.IGNORECASE)
         for code in BLACK_LIST:
-            pattern = rf"\b{r'\.?'.join(list(re.escape(code)))}\.?\b"
+            pattern = rf"\b{'\\.?' .join(list(re.escape(code)))}\\.?\b"
             text = re.sub(pattern, "", text, flags=re.IGNORECASE)
         return re.sub(r'\s{2,}', ' ', text).strip()
 
